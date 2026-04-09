@@ -1,3 +1,5 @@
+chromium
+chromium-browser
 libnss3
 libasound2
 libxss1
