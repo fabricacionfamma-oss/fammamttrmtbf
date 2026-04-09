@@ -1,0 +1,4 @@
+libnss3
+libasound2
+libxss1
+fonts-liberation
