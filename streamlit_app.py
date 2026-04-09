@@ -261,7 +261,8 @@ def crear_pdf_pd_excel(df_data, anio, meses_filtrados):
         fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
         
         tmp_chart = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        fig.write_image(tmp_chart.name, engine="kaleido")
+        # CORRECCIÓN: Eliminado el engine="kaleido" para evitar el DeprecationWarning
+        fig.write_image(tmp_chart.name)
         return tmp_chart.name
 
     def dibujar_bloque_completo(x, y, titulo, obj_t, obj_c, col_real, col_acum, is_lower_better, is_pct=False):
