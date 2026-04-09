@@ -1,4 +1,1 @@
 chromium
-libnss3
-libasound2
-fonts-liberation
