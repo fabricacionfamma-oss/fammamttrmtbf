@@ -25,7 +25,7 @@ st.markdown("""
 col_title, col_btn = st.columns([4, 1])
 with col_title:
     st.title("⚙️ Análisis de MTBF, MTTR y Down Time (FAMMA)")
-    st.write("Generador de Reportes PDF conectado a SQL Server (Filtro Exclusivo Matricería).")
+    st.write("Generador de Reportes PDF conectado a SQL Server (Filtro Exclusivo Matricería y Estampado).")
 with col_btn:
     if st.button("Limpiar Caché", use_container_width=True):
         st.cache_data.clear()
@@ -56,7 +56,8 @@ with col_f1:
     anio_sel = st.selectbox("1. Seleccione el Año:", range(2023, anio_actual + 2), index=anio_actual-2023)
 
 with col_f2:
-    area_sel = st.selectbox("2. Área/Fábrica:", ["Ambas (General)", "Estampado", "Soldadura"])
+    # FORZADO EXCLUSIVO A ESTAMPADO SEGÚN INSTRUCCIÓN
+    area_sel = st.selectbox("2. Área/Fábrica:", ["Estampado"])
 
 with col_f3:
     meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -128,6 +129,7 @@ def fetch_annual_data_famma(anio, area_filtro):
         
         df['Fábrica'] = df['Máquina'].apply(get_fabrica)
         
+        # Filtro estricto
         if area_filtro != "Ambas (General)":
             df = df[df['Fábrica'] == area_filtro]
 
@@ -203,7 +205,7 @@ class ReportePD(FPDF):
         # Cambiamos a un color verde oscuro para diferenciar FAMMA
         self.set_text_color(34, 139, 34)
         
-        area_texto = f" - {area_sel}" if area_sel != "Ambas (General)" else ""
+        area_texto = f" - {area_sel}"
         self.cell(0, 8, f"Reporte de Mantenimiento de Matrices FAMMA{area_texto} - Año {anio_sel}", ln=True, align='C')
         
         self.set_draw_color(34, 139, 34)
@@ -350,7 +352,7 @@ if not df_anual.empty:
     try:
         pdf_bytes = crear_pdf_pd_excel(df_anual, anio_sel, meses_activos)
         
-        area_descarga = "General" if area_sel == "Ambas (General)" else area_sel
+        area_descarga = area_sel
         nombres_meses_str = "_".join(meses_sel) if meses_sel else "Varios"
         
         st.download_button(
