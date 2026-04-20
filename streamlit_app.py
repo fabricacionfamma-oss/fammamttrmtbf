@@ -155,10 +155,10 @@ def fetch_annual_data_famma(anio, area_filtro):
         df['Mes'] = df['Fecha_DT'].dt.month
         df_meses = pd.DataFrame({'Mes': range(1, 13)})
         
-        # UPTIME
+        # UPTIME (Producción pura + todo el tiempo que no fue falla de matricería)
         uptime = df[df['Estado_Global'] == 'Producción'].groupby('Mes')['Tiempo (Min)'].sum().reset_index(name='Tiempo_Productivo_Min')
         
-        # DOWNTIME (Fallas y Gestión - Ahora exclusivo de Matricería)
+        # DOWNTIME (Fallas y Gestión - Exclusivo de Matricería)
         fallas = df[df['Estado_Global'] == 'Falla/Gestión'].groupby('Mes').agg(
             Cantidad_Fallas=('Tiempo (Min)', 'count'),
             Tiempo_Reparacion_Min=('Tiempo (Min)', 'sum')
@@ -204,7 +204,6 @@ class ReportePD(FPDF):
         self.set_text_color(34, 139, 34)
         
         area_texto = f" - {area_sel}" if area_sel != "Ambas (General)" else ""
-        # MODIFICACIÓN 1: Cambio en el título interno del PDF
         self.cell(0, 8, f"Reporte de Mantenimiento de Matrices FAMMA{area_texto} - Año {anio_sel}", ln=True, align='C')
         
         self.set_draw_color(34, 139, 34)
@@ -352,8 +351,6 @@ if not df_anual.empty:
         pdf_bytes = crear_pdf_pd_excel(df_anual, anio_sel, meses_activos)
         
         area_descarga = "General" if area_sel == "Ambas (General)" else area_sel
-        
-        # MODIFICACIÓN 2: Cambio en el nombre del archivo descargado
         nombres_meses_str = "_".join(meses_sel) if meses_sel else "Varios"
         
         st.download_button(
