@@ -25,7 +25,7 @@ st.markdown("""
 col_title, col_btn = st.columns([4, 1])
 with col_title:
     st.title("⚙️ Análisis de MTBF, MTTR y Down Time (FAMMA)")
-    st.write("Generador de Reportes PDF conectado a SQL Server (Módulo Eventos 01).")
+    st.write("Generador de Reportes PDF conectado a SQL Server (Filtro Exclusivo Matricería).")
 with col_btn:
     if st.button("Limpiar Caché", use_container_width=True):
         st.cache_data.clear()
@@ -83,14 +83,14 @@ if not meses_sel:
 meses_activos = [meses_nombres.index(m) + 1 for m in meses_sel]
 
 # ==========================================
-# EXTRACCIÓN Y PROCESAMIENTO DE DATOS (SQL SERVER)
+# EXTRACCIÓN Y PROCESAMIENTO DE DATOS (SQL SERVER - MATRICERÍA)
 # ==========================================
 @st.cache_data(ttl=300)
 def fetch_annual_data_famma(anio, area_filtro):
     try:
         conn = st.connection("wii_bi", type="sql")
         
-        # 1. Consulta SQL integrando las tablas reales y extrayendo todos los niveles
+        # 1. Consulta SQL usando los 9 niveles
         q_event = f"""
             SELECT c.Name as Máquina, e.Interval as [Tiempo (Min)], e.Date as Fecha_DT,
                    t1.Name as [Nivel Evento 1], t2.Name as [Nivel Evento 2], 
@@ -113,104 +113,52 @@ def fetch_annual_data_famma(anio, area_filtro):
         """
         
         df = conn.query(q_event)
-        
-        if df.empty:
-            return pd.DataFrame()
+        if df.empty: return pd.DataFrame()
 
-        # 2. Limpieza de Fechas y Asignación de Fábrica
+        # 1. Limpieza de Fechas
         df['Fecha_DT'] = pd.to_datetime(df['Fecha_DT'], errors='coerce')
         df = df.dropna(subset=['Fecha_DT'])
-        
+
+        # 2. Asignar Fábrica
+        df['Máquina'] = df['Máquina'].fillna('General')
         def get_fabrica(maq):
             m = str(maq).upper().strip()
             if "LINEA" in m or m in ["GENERAL"]: return "Estampado"
             return "Soldadura"
         
-        df['Máquina'] = df['Máquina'].fillna('General')
         df['Fábrica'] = df['Máquina'].apply(get_fabrica)
         
         if area_filtro != "Ambas (General)":
             df = df[df['Fábrica'] == area_filtro]
 
         # 3. Limpieza de Tiempo
-        df['Tiempo (Min)'] = pd.to_numeric(df['Tiempo (Min)'], errors='coerce').fillna(0)
+        df['Tiempo (Min)'] = pd.to_numeric(df['Tiempo (Min)'], errors='coerce').fillna(0.0)
 
-        # 4. Procesamiento de Niveles y Categorización (Lógica Inversa)
-        cols_niveles = [f'Nivel Evento {i}' for i in range(1, 10)]
-        for col in cols_niveles:
-            if col in df.columns: 
-                df[col] = df[col].fillna('').astype(str)
-            else: 
-                df[col] = ''
-
-        # Descartar proyectos para no sumar a DT o Uptime
-        mask_proyecto = (df['Nivel Evento 1'].str.upper().str.contains('PROYECTO') | 
-                         df['Nivel Evento 2'].str.upper().str.contains('PROYECTO') | 
-                         df['Nivel Evento 3'].str.upper().str.contains('PROYECTO') | 
-                         df['Nivel Evento 4'].str.upper().str.contains('PROYECTO'))
-        df = df[~mask_proyecto].copy()
-
-        def parse_event_tree(row):
-            niveles = [str(row.get(c, '')).strip().upper() for c in cols_niveles]
-            validos = [n for n in niveles if n and n not in ['NONE', 'NAN', 'NULL']]
+        # 4. Categorizar Eventos - FILTRO EXCLUSIVO MATRICERIA
+        def categorizar_estado(row):
+            texto = " ".join([str(row.get(f'Nivel Evento {i}', '')).upper() for i in range(1, 10)])
             
-            if not validos:
-                return 'Falla/Gestión', 'Otra Falla/Gestión'
-                
-            texto_completo = " > ".join(validos)
+            if 'PROYECTO' in texto: return 'Proyecto'
+            if any(x in texto for x in ['BAÑO', 'BANO', 'REFRIGERIO']): return 'Descanso'
+            if 'PARADA PROGRAMADA' in texto: return 'Parada Programada'
             
-            # DEFINIR ESTADO GLOBAL
-            estado = 'Falla/Gestión'
-            if 'PROYECTO' in texto_completo: 
-                estado = 'Proyecto'
-            elif any(x in texto_completo for x in ['BAÑO', 'BANO', 'REFRIGERIO', 'DESCANSO']): 
-                estado = 'Descanso'
-            elif any(x in texto_completo for x in ['PARADA PROGRAMADA', 'SMED']): 
-                estado = 'Parada Programada'
-            elif 'PRODUCCION' in validos[0] or 'PRODUCCIÓN' in validos[0]:
-                if any(x in texto_completo for x in ['LOGISTICA', 'LOGÍSTICA', 'MANTENIMIENTO', 'MATRICERIA', 'MATRICERÍA', 'TECNOLOGIA', 'TECNOLOGÍA', 'CALIDAD', 'GESTION', 'GESTIÓN']):
-                    estado = 'Falla/Gestión'
-                else:
-                    estado = 'Producción'
-                    
-            # ESCANEO INVERSO PARA MACRO
-            macro = 'Otra Falla/Gestión'
-            if estado == 'Falla/Gestión':
-                areas = {
-                    'MANTENIMIENTO': 'Mantenimiento',
-                    'MATRICERIA': 'Matricería',
-                    'MATRICERÍA': 'Matricería',
-                    'GESTION': 'Gestión',
-                    'GESTIÓN': 'Gestión',
-                    'LOGISTICA': 'Logística',
-                    'LOGÍSTICA': 'Logística',
-                    'CALIDAD': 'Calidad',
-                    'TECNOLOGIA': 'Tecnología',
-                    'TECNOLOGÍA': 'Tecnología',
-                    'DISPOSITIVO': 'Dispositivos'
-                }
-                for nivel in reversed(validos):
-                    encontrada = False
-                    for clave, valor in areas.items():
-                        if clave in nivel:
-                            macro = valor
-                            encontrada = True
-                            break
-                    if encontrada:
-                        break
-                        
-            return estado, macro
+            # SOLO los eventos de Matricería contabilizan como Falla/Gestión (Downtime)
+            if 'MATRICERIA' in texto or 'MATRICERÍA' in texto:
+                return 'Falla/Gestión'
+            
+            # Cualquier otra falla ajena a matricería o producción normal suma al tiempo productivo (Uptime) de la matriz
+            return 'Producción'
 
-        df[['Estado_Global', 'Categoria_Macro']] = df.apply(lambda row: pd.Series(parse_event_tree(row)), axis=1)
+        df['Estado_Global'] = df.apply(categorizar_estado, axis=1)
 
-        # 5. Agrupación Matemática Mensual
+        # 5. Agrupar Matemáticas
         df['Mes'] = df['Fecha_DT'].dt.month
         df_meses = pd.DataFrame({'Mes': range(1, 13)})
         
         # UPTIME
         uptime = df[df['Estado_Global'] == 'Producción'].groupby('Mes')['Tiempo (Min)'].sum().reset_index(name='Tiempo_Productivo_Min')
         
-        # DOWNTIME (Solo consideramos fallas/gestiones para MTTR/MTBF)
+        # DOWNTIME (Fallas y Gestión - Ahora exclusivo de Matricería)
         fallas = df[df['Estado_Global'] == 'Falla/Gestión'].groupby('Mes').agg(
             Cantidad_Fallas=('Tiempo (Min)', 'count'),
             Tiempo_Reparacion_Min=('Tiempo (Min)', 'sum')
@@ -219,7 +167,7 @@ def fetch_annual_data_famma(anio, area_filtro):
         df_anual = pd.merge(df_meses, uptime, on='Mes', how='left').fillna(0)
         df_anual = pd.merge(df_anual, fallas, on='Mes', how='left').fillna(0)
 
-        # 6. Cálculo de Indicadores
+        # 6. Calcular Indicadores Clave
         df_anual['Uptime_Min'] = df_anual['Tiempo_Productivo_Min']
         df_anual['Downtime_Min'] = df_anual['Tiempo_Reparacion_Min']
         df_anual['Tiempo_Total_Disponible_Min'] = df_anual['Uptime_Min'] + df_anual['Downtime_Min']
@@ -228,7 +176,7 @@ def fetch_annual_data_famma(anio, area_filtro):
         df_anual['MTBF (Min)'] = df_anual.apply(lambda r: r['Uptime_Min'] / r['Cantidad_Fallas'] if r['Cantidad_Fallas'] > 0 else (r['Uptime_Min'] if r['Uptime_Min'] > 0 else 0), axis=1)
         df_anual['MTTR (Min)'] = df_anual.apply(lambda r: r['Downtime_Min'] / r['Cantidad_Fallas'] if r['Cantidad_Fallas'] > 0 else 0, axis=1)
         
-        # Acumulados
+        # 7. Acumulados (YTD)
         df_anual['Cum_Uptime'] = df_anual['Uptime_Min'].cumsum()
         df_anual['Cum_Downtime'] = df_anual['Downtime_Min'].cumsum()
         df_anual['Cum_TotalTime'] = df_anual['Tiempo_Total_Disponible_Min'].cumsum()
@@ -240,10 +188,10 @@ def fetch_annual_data_famma(anio, area_filtro):
 
         return df_anual
     except Exception as e:
-        st.error(f"Error conectando o procesando datos de SQL Server: {e}")
+        st.error(f"Error procesando datos de BD: {e}")
         return pd.DataFrame()
 
-with st.spinner("Conectando con SQL Server y calculando métricas..."):
+with st.spinner("Conectando con SQL Server y calculando métricas de Matricería..."):
     df_anual = fetch_annual_data_famma(anio_sel, area_sel)
 
 # ==========================================
@@ -252,9 +200,12 @@ with st.spinner("Conectando con SQL Server y calculando métricas..."):
 class ReportePD(FPDF):
     def header(self):
         self.set_font("Arial", 'B', 14)
+        # Cambiamos a un color verde oscuro para diferenciar FAMMA
         self.set_text_color(34, 139, 34)
+        
         area_texto = f" - {area_sel}" if area_sel != "Ambas (General)" else ""
-        self.cell(0, 8, f"Reporte de Mantenimiento FAMMA{area_texto} - Año {anio_sel}", ln=True, align='C')
+        # MODIFICACIÓN 1: Cambio en el título interno del PDF
+        self.cell(0, 8, f"Reporte de Mantenimiento de Matrices FAMMA{area_texto} - Año {anio_sel}", ln=True, align='C')
         
         self.set_draw_color(34, 139, 34)
         self.set_line_width(0.5)
@@ -275,12 +226,15 @@ def crear_pdf_pd_excel(df_data, anio, meses_filtrados):
 
     def generar_grafico_tendencia_pdf(df, col_real, obj_t, obj_c, is_pct):
         df_plot = df[df['Mes'].isin(meses_filtrados)].copy()
+        
+        # Extracción a listas puras para alinear matemáticamente con FPDF
         y_vals = df_plot[col_real].tolist()
         x_vals = list(range(len(y_vals))) 
         
         fig = go.Figure()
         text_format = [f"{v:.1f}%" if is_pct else f"{v:.0f}" for v in y_vals]
         
+        # Color verde FAMMA para las barras
         fig.add_trace(go.Bar(
             x=x_vals, y=y_vals, name="Real (A)",
             marker_color='#28a745', text=text_format, textposition='auto', textfont=dict(size=12)
@@ -322,6 +276,7 @@ def crear_pdf_pd_excel(df_data, anio, meses_filtrados):
         
         pdf.set_xy(x, y)
         pdf.set_font("Arial", 'B', 8)
+        # Colores personalizados para las cajas FAMMA
         pdf.set_text_color(255, 255, 255); pdf.set_fill_color(34, 139, 34); pdf.set_draw_color(0, 0, 0); pdf.set_line_width(0.2)
         pdf.cell(w_tot, 5, "  " + titulo, border=1, align='L', fill=True)
 
@@ -332,7 +287,7 @@ def crear_pdf_pd_excel(df_data, anio, meses_filtrados):
         y_tabla = y + 40 
         
         pdf.set_xy(x, y_tabla)
-        pdf.set_fill_color(228, 243, 228); pdf.set_text_color(0,0,0)
+        pdf.set_fill_color(228, 243, 228); pdf.set_text_color(0,0,0) # Fondo verde claro
         pdf.cell(w_lbl, 5, "", border=0, align='C', fill=False) 
         for i in meses_filtrados: 
             m_letra = meses_letras[i-1]
@@ -398,10 +353,13 @@ if not df_anual.empty:
         
         area_descarga = "General" if area_sel == "Ambas (General)" else area_sel
         
+        # MODIFICACIÓN 2: Cambio en el nombre del archivo descargado
+        nombres_meses_str = "_".join(meses_sel) if meses_sel else "Varios"
+        
         st.download_button(
             label=f"📄 Descargar Reporte PDF ({area_descarga})",
             data=pdf_bytes,
-            file_name=f"Indicadores_Mantenimiento_FAMMA_{area_descarga}_{anio_sel}.pdf",
+            file_name=f"FAMMA_MTTR_MTBF_{nombres_meses_str}_{anio_sel}.pdf",
             mime="application/pdf"
         )
     except Exception as e:
