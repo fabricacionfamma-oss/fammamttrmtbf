@@ -1,5 +1,7 @@
 streamlit
 pandas
 plotly
-fpdf
 kaleido
+fpdf
+SQLAlchemy
+pymssql
