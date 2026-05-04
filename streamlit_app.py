@@ -49,30 +49,34 @@ TARGET_MTBF_C = 500
 st.markdown('<div class="filter-box">', unsafe_allow_html=True)
 st.subheader("🔍 Filtros del Reporte")
 
-col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+# Envolvemos los filtros en un form para evitar recargas automáticas
+with st.form("form_filtros_famma"):
+    col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
 
-with col_f1:
-    anio_actual = pd.to_datetime("today").year
-    anio_sel = st.selectbox("1. Seleccione el Año:", range(2023, anio_actual + 2), index=anio_actual-2023)
+    with col_f1:
+        anio_actual = pd.to_datetime("today").year
+        anio_sel = st.selectbox("1. Seleccione el Año:", range(2023, anio_actual + 2), index=anio_actual-2023)
 
-with col_f2:
-    # FORZADO EXCLUSIVO A ESTAMPADO SEGÚN INSTRUCCIÓN
-    area_sel = st.selectbox("2. Área/Fábrica:", ["Estampado"])
+    with col_f2:
+        # FORZADO EXCLUSIVO A ESTAMPADO SEGÚN INSTRUCCIÓN
+        area_sel = st.selectbox("2. Área/Fábrica:", ["Estampado"])
 
-with col_f3:
-    meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-    
-    if anio_sel == anio_actual:
-        mes_actual = pd.to_datetime("today").month
-        default_meses = meses_nombres[:mes_actual]
-    else:
-        default_meses = meses_nombres
+    with col_f3:
+        meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
         
-    meses_sel = st.multiselect(
-        "3. Seleccione los Meses a incluir en el PDF:", 
-        options=meses_nombres, 
-        default=default_meses
-    )
+        if anio_sel == anio_actual:
+            mes_actual = pd.to_datetime("today").month
+            default_meses = meses_nombres[:mes_actual]
+        else:
+            default_meses = meses_nombres
+            
+        meses_sel = st.multiselect(
+            "3. Seleccione los Meses a incluir en el PDF:", 
+            options=meses_nombres, 
+            default=default_meses
+        )
+        
+    btn_aplicar = st.form_submit_button("Aplicar Filtros")
 
 st.markdown('</div>', unsafe_allow_html=True)
 st.divider()
@@ -219,6 +223,8 @@ class ReportePD(FPDF):
         self.set_text_color(128)
         self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "C")
 
+# Agregamos el decorador cache para que la generación no se pise si hay recargas
+@st.cache_data(show_spinner=False)
 def crear_pdf_pd_excel(df_data, anio, meses_filtrados):
     pdf = ReportePD(orientation='L', unit='mm', format='A4')
     pdf.add_page()
